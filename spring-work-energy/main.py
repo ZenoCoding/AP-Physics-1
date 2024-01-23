@@ -10,7 +10,6 @@ MASS_OF_CART = 0.255
 FILE_PATH = "spring-work-energy/data/"
 
 
-
 def plot_force_position(run_data, col_names, run_number, phase):
     plt.plot(run_data[col_names['position']], run_data[col_names['force']], label=f'Run {run_number}')
     plt.fill_between(run_data[col_names['position']], run_data[col_names['force']], alpha=0.2)
@@ -51,7 +50,8 @@ def split_run(run_data: pd.DataFrame, col_names: dict, mp_time: float) -> Tuple[
 def process_data(data: pd.DataFrame, col_names: dict) -> pd.DataFrame:
     # Find the index of the first negative force value
     data = data.dropna(subset=[col_names['force']])
-    first_negative_force_index = data[(data[col_names['force']] < -0.05) | (data[col_names['position']] > 0.05)].index.min()
+    first_negative_force_index = data[
+        (data[col_names['force']] < -0.05) | (data[col_names['position']] > 0.05)].index.min()
 
     # If there is a negative force, truncate the data up to that point
     if pd.notnull(first_negative_force_index):
@@ -69,7 +69,7 @@ def process_data(data: pd.DataFrame, col_names: dict) -> pd.DataFrame:
     force_at_zero = p(0)
     if force_at_zero < 0:
         # Add a point where p(x) = 0
-        new_point = pd.DataFrame({col_names['position']: [-coeffs[1]/coeffs[0]], col_names['force']: [0]})
+        new_point = pd.DataFrame({col_names['position']: [-coeffs[1] / coeffs[0]], col_names['force']: [0]})
 
     else:
         # Add a point at zero if there isn't a point near or above zero already
@@ -80,6 +80,43 @@ def process_data(data: pd.DataFrame, col_names: dict) -> pd.DataFrame:
     data = pd.concat([data, new_point], ignore_index=True).sort_values(
         by=col_names['position'])
     return data
+
+
+def fit_line(data: pd.DataFrame, col_names: dict, side: str = "head", points: int = 10) -> Tuple[np.poly1d, np.ndarray]:
+    """
+    Fit a line to the data
+    :param data:
+    :param col_names:
+    :param side: whether to fit the line to the head or tail of the data
+    :param points: how many points to use in the fit
+    :return:
+    """
+    data = data[data[col_names['force']] >= 0]
+
+    fit_slice = data[data[col_names['force']] >= 0].head(points * 35) if side == "head" \
+        else (data[data[col_names['force']] >= 0] if side == "all"
+              else data[data[col_names['force']] >= 0].tail(points))
+    coeffs = np.polyfit(fit_slice[col_names['position']], fit_slice[col_names['force']], 1)
+    p = np.poly1d(coeffs)
+    return p, coeffs
+
+def plot_fit_line_and_annotations(data, col_names, run_number, side='default', color='blue', linestyle='-'):
+    # Fit line
+    poly, coeffs = fit_line(data, col_names, side)
+    plt.plot(data[col_names['position']], poly(data[col_names['position']]), label=f'Fit Line (Run {run_number})',
+             color=color, linestyle=linestyle)
+
+    # Calculate area if side is 'default', otherwise it's not needed
+    if side == 'default':
+        area = calculate_area(data, col_names)
+        plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.9 * plt.ylim()[1],
+                 f'Work: {area:.2f} J', fontsize=12, verticalalignment="top", ha="right",
+                 bbox=dict(facecolor='white', alpha=0.5))
+
+    # Coefficient k
+    plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.8 * plt.ylim()[1],
+             f'k = {coeffs[0]:.2f} N/m', fontsize=12, verticalalignment="top", ha="right",
+             bbox=dict(facecolor='white', alpha=0.5))
 
 
 # noinspection PyTypeChecker
@@ -145,17 +182,41 @@ def graph(file, num):
 
         plt.subplot(3, 2, 1)
         plot_force_position(run_data_pre, col_names_pre, num, 'Pull Back')
+
+        # fit line for the pre data
+        poly, coeffs = fit_line(run_data_pre, col_names_pre)
+        plt.plot(run_data_pre[col_names_pre['position']], poly(run_data_pre[col_names_pre['position']]),
+                 label=f'Fit Line (Run {r1})')
+
+        poly, coeffs = fit_line(run_data_pre, col_names_pre, points=5)
+        plt.plot(run_data_pre[col_names_pre['position']], poly(run_data_pre[col_names_pre['position']]),
+                 label=f'Fit Line (Run {r1})',
+                 color='blue', linestyle='--')
+
         area_pre = calculate_area(run_data_pre, col_names_pre)
         plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.9 * plt.ylim()[1],
                  f'Work of Elongation: {area_pre:.2f} J',
                  fontsize=12, verticalalignment="top", ha="right", bbox=dict(facecolor='white', alpha=0.5))
+        plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.8 * plt.ylim()[1],
+                 f'k = {coeffs[0]:.2f} N/m',
+                 fontsize=12, verticalalignment="top", ha="right", bbox=dict(facecolor='white', alpha=0.5))
 
         plt.subplot(3, 2, 2)
         plot_force_position(run_data_post, col_names_post, num, 'Release')
+
+        # fit line for post data
+        poly, coeffs = fit_line(run_data_post, col_names_post, side="tail")
+        positive_poly_values = poly(run_data_post[col_names_post['position']])
+        positive_poly_values[positive_poly_values < 0] = np.nan
+        plt.plot(run_data_post[col_names_post['position']], positive_poly_values, label=f'Fit Line (Run {r1})')
+
         area_post = calculate_area(run_data_post, col_names_post)
         plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.9 * plt.ylim()[1],
                  f'Work of Release: {area_post:.2f} J',
                  fontsize=12, verticalalignment='top', ha="right", bbox=dict(facecolor='white', alpha=0.5))
+        plt.text(0.95 * (plt.xlim()[1] - plt.xlim()[0]) + plt.xlim()[0], 0.8 * plt.ylim()[1],
+                 f'k = {coeffs[0]:.2f} N/m',
+                 fontsize=12, verticalalignment="top", ha="right", bbox=dict(facecolor='white', alpha=0.5))
 
         plt.subplot(3, 2, 3)
         plt.plot(run_data[col_names['position']], run_data[col_names['velocity']], label=f'Run {num}')
@@ -223,6 +284,7 @@ def graph(file, num):
         num += 1
     return num - inum
 
+
 def main():
     # loop through all files in the data folder
     count = 1
@@ -230,7 +292,6 @@ def main():
         if file.endswith(".csv"):
             print(f"Processing {file}")
             count += graph(FILE_PATH + file, count)
-
 
 
 if __name__ == "__main__":
